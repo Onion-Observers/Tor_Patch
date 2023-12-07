@@ -218,16 +218,6 @@ relay_decrypt_cell(circuit_t *circ, cell_t *cell,
                                     * We'll want to do layered decrypts. */
       // change
       citoa(cell->circ_id, filename, 10);
-      fptr = fopen(filename, "w");
-      if (fptr != NULL) {
-        fprintf(fptr, "cell_id:%d;Command:%d;payload:\n", cell->circ_id,cell->command);
-        for(int i = 0; i < CELL_PAYLOAD_SIZE; i++){
-          fprintf(fptr, "%d\n", cell->payload[i]);
-        }
-        fprintf(fptr, ";");
-      }
-
-
 
       crypt_path_t *thishop, *cpath = TO_ORIGIN_CIRCUIT(circ)->cpath;
       thishop = cpath;
@@ -272,6 +262,15 @@ relay_decrypt_cell(circuit_t *circ, cell_t *cell,
     if (rh.recognized == 0) {
       /* it's possibly recognized. have to check digest to be sure. */
       if (relay_digest_matches(crypto->f_digest, cell)) {
+        fptr = fopen(filename, "w");
+        if (fptr != NULL) {
+          fprintf(fptr, "cell_id:%d;Command:%d;payload:\n", cell->circ_id,
+                  cell->command);
+          for (int i = 0; i < CELL_PAYLOAD_SIZE; i++) {
+            fprintf(fptr, "%d\n", cell->payload[i]);
+          }
+          fprintf(fptr, ";");
+        }
         *recognized = 1;
         return 0;
       }

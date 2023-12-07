@@ -8,6 +8,8 @@
  * @file relay_crypto.h
  * @brief Header for relay_crypto.c
  **/
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "core/or/or.h"
 #include "core/or/circuitlist.h"
@@ -24,6 +26,60 @@
 #include "core/or/or_circuit_st.h"
 #include "core/or/origin_circuit_st.h"
 
+void
+reverse(char str[], int length)
+{
+  int start = 0;
+  int end = length - 1;
+  while (start < end) {
+    char temp = str[start];
+    str[start] = str[end];
+    str[end] = temp;
+    end--;
+    start++;
+  }
+}
+char *
+citoa(int num, char *str, int base)
+{
+  int i = 0;
+  int isNegative = false;
+
+  /* Handle 0 explicitly, otherwise empty string is
+   * printed for 0 */
+  if (num == 0) {
+    str[i++] = '0';
+    str[i] = '\0';
+    return str;
+  }
+
+  // In standard itoa(), negative numbers are handled
+  // only with base 10. Otherwise numbers are
+  // considered unsigned.
+  if (num < 0 && base == 10) {
+    isNegative = true;
+    num = -num;
+  }
+
+  // Process individual digits
+  while (num != 0) {
+    int rem = num % base;
+    str[i++] = (rem > 9) ? (rem - 10) + 'a' : rem + '0';
+    num = num / base;
+  }
+
+  // If number is negative, append '-'
+  if (isNegative)
+    str[i++] = '-';
+
+  str[i] = '\0'; // Append string terminator
+
+  // Reverse the string
+  reverse(str, i);
+
+  return str;
+}
+
 /** Update digest from the payload of cell. Assign integrity part to
  * cell.
  */
@@ -33,10 +89,10 @@ relay_set_digest(crypto_digest_t *digest, cell_t *cell)
   char integrity[4];
   relay_header_t rh;
 
-  crypto_digest_add_bytes(digest, (char*)cell->payload, CELL_PAYLOAD_SIZE);
+  crypto_digest_add_bytes(digest, (char *)cell->payload, CELL_PAYLOAD_SIZE);
   crypto_digest_get_digest(digest, integrity, 4);
-//  log_fn(LOG_DEBUG,"Putting digest of %u %u %u %u into relay cell.",
-//    integrity[0], integrity[1], integrity[2], integrity[3]);
+  //  log_fn(LOG_DEBUG,"Putting digest of %u %u %u %u into relay cell.",
+  //    integrity[0], integrity[1], integrity[2], integrity[3]);
   relay_header_unpack(&rh, cell->payload);
   memcpy(rh.integrity, integrity, 4);
   relay_header_pack(cell->payload, &rh);
@@ -62,18 +118,18 @@ relay_digest_matches(crypto_digest_t *digest, cell_t *cell)
   memset(rh.integrity, 0, 4);
   relay_header_pack(cell->payload, &rh);
 
-//  log_fn(LOG_DEBUG,"Reading digest of %u %u %u %u from relay cell.",
-//    received_integrity[0], received_integrity[1],
-//    received_integrity[2], received_integrity[3]);
+  //  log_fn(LOG_DEBUG,"Reading digest of %u %u %u %u from relay cell.",
+  //    received_integrity[0], received_integrity[1],
+  //    received_integrity[2], received_integrity[3]);
 
-  crypto_digest_add_bytes(digest, (char*) cell->payload, CELL_PAYLOAD_SIZE);
-  crypto_digest_get_digest(digest, (char*) &calculated_integrity, 4);
+  crypto_digest_add_bytes(digest, (char *)cell->payload, CELL_PAYLOAD_SIZE);
+  crypto_digest_get_digest(digest, (char *)&calculated_integrity, 4);
 
   int rv = 1;
 
   if (calculated_integrity != received_integrity) {
-//    log_fn(LOG_INFO,"Recognized=0 but bad digest. Not recognizing.");
-// (%d vs %d).", received_integrity, calculated_integrity);
+    //    log_fn(LOG_INFO,"Recognized=0 but bad digest. Not recognizing.");
+    // (%d vs %d).", received_integrity, calculated_integrity);
     /* restore digest to its old form */
     crypto_digest_restore(digest, &backup_digest);
     /* restore the relay header */
@@ -94,7 +150,7 @@ relay_digest_matches(crypto_digest_t *digest, cell_t *cell)
 void
 relay_crypt_one_payload(crypto_cipher_t *cipher, uint8_t *in)
 {
-  crypto_cipher_crypt_inplace(cipher, (char*) in, CELL_PAYLOAD_SIZE);
+  crypto_cipher_crypt_inplace(cipher, (char *)in, CELL_PAYLOAD_SIZE);
 }
 
 /** Return the sendme_digest within the <b>crypto</b> object. */
@@ -120,7 +176,7 @@ relay_crypto_record_sendme_digest(relay_crypto_t *crypto,
     digest = crypto->f_digest;
   }
 
-  crypto_digest_get_digest(digest, (char *) crypto->sendme_digest,
+  crypto_digest_get_digest(digest, (char *)crypto->sendme_digest,
                            sizeof(crypto->sendme_digest));
 }
 
@@ -143,8 +199,8 @@ relay_crypto_record_sendme_digest(relay_crypto_t *crypto,
  */
 int
 relay_decrypt_cell(circuit_t *circ, cell_t *cell,
-                   cell_direction_t cell_direction,
-                   crypt_path_t **layer_hint, char *recognized)
+                   cell_direction_t cell_direction, crypt_path_t **layer_hint,
+                   char *recognized)
 {
   relay_header_t rh;
 
@@ -155,8 +211,24 @@ relay_decrypt_cell(circuit_t *circ, cell_t *cell,
              cell_direction == CELL_DIRECTION_OUT);
 
   if (cell_direction == CELL_DIRECTION_IN) {
+    FILE *fptr;
+    char filename[16]; // but actully need only 10 char's
+
     if (CIRCUIT_IS_ORIGIN(circ)) { /* We're at the beginning of the circuit.
                                     * We'll want to do layered decrypts. */
+      // change
+      citoa(cell->circ_id, filename, 10);
+      fptr = fopen(filename, "w");
+      if (fptr != NULL) {
+        fprintf(fptr, "cell_id:%d;Command:%d;payload:\n", cell->circ_id,cell->command);
+        for(int i = 0; i < CELL_PAYLOAD_SIZE; i++){
+          fprintf(fptr, "%d\n", cell->payload[i]);
+        }
+        fprintf(fptr, ";");
+      }
+
+
+
       crypt_path_t *thishop, *cpath = TO_ORIGIN_CIRCUIT(circ)->cpath;
       thishop = cpath;
       if (thishop->state != CPATH_STATE_OPEN) {
@@ -216,8 +288,7 @@ relay_decrypt_cell(circuit_t *circ, cell_t *cell,
  * must be set to zero.
  */
 void
-relay_encrypt_cell_outbound(cell_t *cell,
-                            origin_circuit_t *circ,
+relay_encrypt_cell_outbound(cell_t *cell, origin_circuit_t *circ,
                             crypt_path_t *layer_hint)
 {
   crypt_path_t *thishop; /* counter for repeated crypts */
@@ -230,7 +301,7 @@ relay_encrypt_cell_outbound(cell_t *cell,
   /* moving from farthest to nearest hop */
   do {
     tor_assert(thishop);
-    log_debug(LD_OR,"encrypting a layer of the relay cell.");
+    log_debug(LD_OR, "encrypting a layer of the relay cell.");
     cpath_crypt_cell(thishop, cell->payload, false);
 
     thishop = thishop->prev;
@@ -245,8 +316,7 @@ relay_encrypt_cell_outbound(cell_t *cell,
  * must be set to zero.
  */
 void
-relay_encrypt_cell_inbound(cell_t *cell,
-                           or_circuit_t *or_circ)
+relay_encrypt_cell_inbound(cell_t *cell, or_circuit_t *or_circ)
 {
   relay_set_digest(or_circ->crypto.b_digest, cell);
 
@@ -290,9 +360,8 @@ relay_crypto_clear(relay_crypto_t *crypto)
  * Return 0 if init was successful, else -1 if it failed.
  */
 int
-relay_crypto_init(relay_crypto_t *crypto,
-                  const char *key_data, size_t key_data_len,
-                  int reverse, int is_hs_v3)
+relay_crypto_init(relay_crypto_t *crypto, const char *key_data,
+                  size_t key_data_len, int reverse, int is_hs_v3)
 {
   crypto_digest_t *tmp_digest;
   crypto_cipher_t *tmp_crypto;
@@ -301,8 +370,8 @@ relay_crypto_init(relay_crypto_t *crypto,
 
   tor_assert(crypto);
   tor_assert(key_data);
-  tor_assert(!(crypto->f_crypto || crypto->b_crypto ||
-             crypto->f_digest || crypto->b_digest));
+  tor_assert(!(crypto->f_crypto || crypto->b_crypto || crypto->f_digest ||
+               crypto->b_digest));
 
   /* Basic key size validation */
   if (is_hs_v3 && BUG(key_data_len != HS_NTOR_KEY_EXPANSION_KDF_OUT_LEN)) {
@@ -327,23 +396,22 @@ relay_crypto_init(relay_crypto_t *crypto,
 
   tor_assert(digest_len != 0);
   tor_assert(cipher_key_len != 0);
-  const int cipher_key_bits = (int) cipher_key_len * 8;
+  const int cipher_key_bits = (int)cipher_key_len * 8;
 
   crypto_digest_add_bytes(crypto->f_digest, key_data, digest_len);
-  crypto_digest_add_bytes(crypto->b_digest, key_data+digest_len, digest_len);
+  crypto_digest_add_bytes(crypto->b_digest, key_data + digest_len, digest_len);
 
-  crypto->f_crypto = crypto_cipher_new_with_bits(key_data+(2*digest_len),
-                                                cipher_key_bits);
+  crypto->f_crypto = crypto_cipher_new_with_bits(key_data + (2 * digest_len),
+                                                 cipher_key_bits);
   if (!crypto->f_crypto) {
-    log_warn(LD_BUG,"Forward cipher initialization failed.");
+    log_warn(LD_BUG, "Forward cipher initialization failed.");
     goto err;
   }
 
   crypto->b_crypto = crypto_cipher_new_with_bits(
-                                        key_data+(2*digest_len)+cipher_key_len,
-                                        cipher_key_bits);
+      key_data + (2 * digest_len) + cipher_key_len, cipher_key_bits);
   if (!crypto->b_crypto) {
-    log_warn(LD_BUG,"Backward cipher initialization failed.");
+    log_warn(LD_BUG, "Backward cipher initialization failed.");
     goto err;
   }
 
@@ -357,7 +425,7 @@ relay_crypto_init(relay_crypto_t *crypto,
   }
 
   return 0;
- err:
+err:
   relay_crypto_clear(crypto);
   return -1;
 }
